@@ -43,18 +43,20 @@ frappe.Chat = class {
     this.chat_bubble.render();
 
     const navbar_icon_html = `
-        <li class='nav-item dropdown dropdown-notifications 
-          dropdown-mobile chat-navbar-icon' title="Show Chats" >
-          ${frappe.utils.icon('small-message', 'md')}
-          <span class="badge" id="chat-notification-count"></span>
-        </li>
+      <div class="desktop-notifications">
+        <div class='dropdown dropdown-notifications'>
+          <span class='chat-navbar-icon'>
+            ${frappe.utils.icon('small-message', 'md')}
+            <span class="badge" id="chat-notification-count"></span>
+          </span>
+        </div>
+      </div>
     `;
 
     if (this.is_desk === true) {
-      $('header.navbar > .container > .navbar-collapse > ul').prepend(
-        navbar_icon_html
-      );
+      $('.navbar-container .desktop-notifications').after(navbar_icon_html);
     }
+  
     this.setup_events();
   }
 
