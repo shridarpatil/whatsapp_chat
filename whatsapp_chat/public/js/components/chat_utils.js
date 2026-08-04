@@ -106,6 +106,10 @@ async function mark_message_read(room) {
         room: room,
       },
     });
+    // Every caller of this changes the unread state on the server, and two
+    // of the three never touched the badge. Reconciling here covers all of
+    // them at once.
+    refresh_notification_count();
   } catch (error) {
     //pass
   }
@@ -170,19 +174,59 @@ function get_avatar_html(room_type, user_email, room_name) {
   return avatar_html;
 }
 
-function set_notification_count(type) {
-  const current_count = frappe.Chat.settings.unread_count;
-  if (type === 'increment') {
-    $('#chat-notification-count').text(current_count + 1);
-    frappe.Chat.settings.unread_count += 1;
-  } else {
-    if (current_count - 1 === 0) {
-      $('#chat-notification-count').text('');
-    } else {
-      $('#chat-notification-count').text(current_count - 1);
+/**
+ * Paint the badge. Never below zero, blank at zero.
+ *
+ * The old code blanked the badge only when `current - 1 === 0`, so a
+ * decrement at zero rendered a literal "-1" in the navbar.
+ */
+function render_notification_count(count) {
+  const value = Math.max(0, Number(count) || 0);
+  frappe.Chat.settings.unread_count = value;
+  $('#chat-notification-count').text(value > 0 ? value : '');
+  return value;
+}
+
+let unread_refresh_timer = null;
+
+/**
+ * Ask the server for the true unread-chat count and repaint.
+ *
+ * The badge was a running +/-1 tally seeded once at page load, so every
+ * path that changes read state had to adjust it by exactly one — and
+ * several never did (chat_list's mark_message_read when a message lands on
+ * an open chat, and both chat_space calls). It drifted and stayed wrong
+ * until a reload. The server is now the authority; the tally survives only
+ * as instant feedback.
+ *
+ * Debounced, so a burst of arriving messages costs one request, not one
+ * each.
+ */
+function refresh_notification_count() {
+  clearTimeout(unread_refresh_timer);
+  unread_refresh_timer = setTimeout(async () => {
+    try {
+      const res = await frappe.call({
+        method: 'whatsapp_chat.api.contacts.unread_count',
+      });
+      render_notification_count(res.message);
+    } catch (error) {
+      // Keep the optimistic value rather than blanking a badge that may
+      // well be right; the next event reconciles it.
     }
-    frappe.Chat.settings.unread_count -= 1;
-  }
+  }, 400);
+}
+
+/**
+ * Optimistic +/-1 for immediate feedback, then reconciled against the
+ * server. Callers stay unchanged.
+ */
+function set_notification_count(type) {
+  const current_count = Number(frappe.Chat.settings.unread_count) || 0;
+  render_notification_count(
+    type === 'increment' ? current_count + 1 : current_count - 1
+  );
+  refresh_notification_count();
 }
 
 export {
@@ -202,4 +246,6 @@ export {
   set_user_settings,
   get_avatar_html,
   set_notification_count,
+  refresh_notification_count,
+  render_notification_count,
 };

@@ -148,6 +148,21 @@ doc_events = {
 # Scheduled Tasks
 # ---------------
 
+scheduler_events = {
+    "daily": [
+        # A number usually reaches WhatsApp before anyone creates the ERPNext
+        # Contact for it. Without this, a room keeps Meta's profile name for
+        # good, because names are otherwise only resolved when a message
+        # arrives.
+        "whatsapp_chat.api.contact_sync.refresh_unlinked_rooms",
+        # WhatsApp Contact.is_read is a cache over the message statuses.
+        # Anything that moves a status outside the hooks leaves rooms
+        # claiming to be unread with nothing unread in them, which the chat
+        # list highlights and the badge counts.
+        "whatsapp_chat.api.contacts.reconcile_read_flags",
+    ]
+}
+
 # scheduler_events = {
 #	"all": [
 #		"whatsapp_chat.tasks.all"

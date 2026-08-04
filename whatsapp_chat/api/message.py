@@ -1,7 +1,10 @@
 import frappe
 import mimetypes
 
+from whatsapp_chat.api import contact_sync
 
+# The status frappe_whatsapp writes once Meta accepts a read receipt.
+READ_STATUS = "marked as read"
 
 @frappe.whitelist()
 def get_all(room: str, user_no: str):
@@ -17,82 +20,130 @@ def get_all(room: str, user_no: str):
             when `to` <> '' then `to`
             else
             'Administrator'
-        end as sender_user_no,
+            end as sender_user_no,
         case
             when COALESCE(content_type, 'text') = 'text' then COALESCE(message, '')
             else COALESCE(attach, message, '')
-        end as content,
+            end as content,
         case
             when COALESCE(content_type, 'text') <> 'text' then message
             else NULL
-        end as caption,
-        COALESCE(content_type, 'text') as content_type
+            end as caption,
+        COALESCE(content_type, 'text') as content_type,
+        COALESCE(status, 'sent') as status,
+        case
+            when `to` <> '' then 'Outgoing'
+            else 'Incoming'
+            end as direction
         from `tabWhatsApp Message` where (`to` = %(user_no)s or `from` = %(user_no)s)
         AND COALESCE(message_type, '') <> 'Template'
         order by creation asc
-    """, {"user_no": user_no}, as_dict=True)
-
+        """, {"user_no": user_no}, as_dict=True)
 
 @frappe.whitelist()
 def mark_as_read(room):
-    """Mark messages as read in local DB and optionally send read receipts to WhatsApp."""
+    """Mark a room read — called by the chat UI when a room is opened."""
     try:
-        # Update local contact status
-        frappe.db.set_value("WhatsApp Contact", room, "is_read", 1, update_modified=False)
+        mark_conversation_read(room)
         frappe.db.commit()
-
-        # Send read receipts to WhatsApp if enabled
-        send_whatsapp_read_receipts(room)
     except Exception:
-        pass  # Ignore concurrent update errors
+        frappe.log_error(frappe.get_traceback(), "WhatsApp Chat Mark As Read")
     return "ok"
 
 
-def send_whatsapp_read_receipts(room):
-    """Send read receipts to WhatsApp for unread incoming messages."""
-    try:
-        # Get the contact's mobile number
-        contact = frappe.get_doc("WhatsApp Contact", room)
-        if not contact.mobile_no:
-            return
+def mark_conversation_read(room, send_receipt=True):
+    """Clear a conversation's unread state, locally and at Meta.
 
-        # Find unread incoming messages for this contact
-        unread_messages = frappe.get_all(
-            "WhatsApp Message",
-            filters={
-                "from": contact.mobile_no,
-                "type": "Incoming",
-                "status": ["not in", ["marked as read"]]
-            },
-            fields=["name", "whatsapp_account"],
-            order_by="creation desc",
-            limit=10
+    Called when a room is opened *and* on every outgoing message, so a reply
+    from the chat UI, the REST API or Claude Desktop all settle the
+    conversation identically. Previously only the UI path existed, which is
+    why a chat answered from Claude Desktop stayed unread until someone
+    opened it by hand.
+
+    Note the direction of travel. Meta reports statuses only for messages we
+    *sent* (sent -> delivered -> read), and that already works. "Read" on an
+    incoming message is something we push *to* Meta; it never arrives on the
+    webhook. There is nothing to fetch.
+
+    `room` accepts a name or a loaded document.
+    """
+    if isinstance(room, str):
+        room = frappe.get_doc("WhatsApp Contact", room)
+
+    if not room.mobile_no:
+        return 0
+
+    if not room.is_read:
+        frappe.db.set_value(
+            "WhatsApp Contact", room.name, "is_read", 1, update_modified=False
         )
+        room.is_read = 1
 
-        if not unread_messages:
-            return
+    # COALESCE, not a `!=` filter: 477 incoming messages on this site have a
+    # NULL status, and `status != 'marked as read'` evaluates to NULL for
+    # every one of them in SQL — so the old filter matched nothing at all.
+    pending = frappe.db.sql(
+        """
+        SELECT name, message_id, whatsapp_account
+        FROM `tabWhatsApp Message`
+        WHERE `from` = %(mobile_no)s
+          AND type = 'Incoming'
+          AND COALESCE(status, '') != %(status)s
+        ORDER BY creation DESC
+        """,
+        {"mobile_no": room.mobile_no, "status": READ_STATUS},
+        as_dict=True,
+    )
 
-        # Check if auto read receipt is enabled for the account
-        for msg in unread_messages:
-            if not msg.whatsapp_account:
-                continue
+    if not pending:
+        return 0
 
-            allow_auto_read = frappe.db.get_value(
-                "WhatsApp Account",
-                msg.whatsapp_account,
-                "allow_auto_read_receipt"
-            )
+    # One receipt, for the newest message. Meta settles the whole
+    # conversation from it, so a chat with 40 unread messages costs one API
+    # call rather than 40.
+    if send_receipt:
+        send_read_receipt(pending[0])
 
-            if allow_auto_read:
-                try:
-                    msg_doc = frappe.get_doc("WhatsApp Message", msg.name)
-                    msg_doc.send_read_receipt()
-                except Exception as e:
-                    frappe.log_error(f"Failed to send read receipt for {msg.name}: {str(e)}", "WhatsApp Chat Read Receipt")
-    except Exception as e:
-        frappe.log_error(f"send_whatsapp_read_receipts error: {str(e)}", "WhatsApp Chat Read Receipt")
+    frappe.db.set_value(
+        "WhatsApp Message",
+        {"name": ("in", [msg.name for msg in pending])},
+        "status",
+        READ_STATUS,
+        update_modified=False,
+    )
+
+    return len(pending)
 
 
+def send_read_receipt(message):
+    """Push a read receipt to Meta for one message, if the account allows it.
+
+    Silent no-op when `allow_auto_read_receipt` is off on the WhatsApp
+    Account — that switch is the business's decision about whether senders
+    see blue ticks, and it is respected here rather than worked around.
+    """
+    if not message.get("message_id") or not message.get("whatsapp_account"):
+        return False
+
+    if not frappe.db.get_value(
+        "WhatsApp Account", message.whatsapp_account, "allow_auto_read_receipt"
+    ):
+        return False
+
+    try:
+        frappe.get_doc("WhatsApp Message", message.name).send_read_receipt()
+        return True
+    except Exception:
+        frappe.log_error(
+            f"Read receipt failed for {message.name}\n\n{frappe.get_traceback()}",
+            "WhatsApp Chat Read Receipt",
+        )
+        return False
+
+
+def send_whatsapp_read_receipts(room):
+    """Kept for callers outside this module; use mark_conversation_read()."""
+    return mark_conversation_read(room)
 
 @frappe.whitelist()
 def send(content, user, room, user_no, attachment=None):
@@ -126,19 +177,28 @@ def send(content, user, room, user_no, attachment=None):
 
     return "ok"
 
-
 def last_message(doc, method):
-    if doc.type == 'Outgoing':
-        mobile_no = doc.to
-    else:
-        mobile_no = doc.get("from")
+    """after_insert on WhatsApp Message — keep the chat list in step.
 
+    Three jobs in order: refresh the room, give it its best name, then
+    settle the read state. The name is resolved before the realtime push so
+    the chat list shows the customer's name rather than their number.
+    """
+    is_outgoing = doc.type == "Outgoing"
+    mobile_no = doc.to if is_outgoing else doc.get("from")
+
+    if not mobile_no:
+        return "ok"
 
     contact_name = frappe.db.get_value("WhatsApp Contact", filters={"mobile_no": mobile_no})
     if contact_name:
         chat_doc = frappe.get_doc("WhatsApp Contact", contact_name)
         chat_doc.last_message = doc.message
-        chat_doc.is_read = 0
+        # An outgoing message IS the reply, so the conversation has been
+        # dealt with and must not flip back to unread. Setting is_read = 0
+        # unconditionally here is what made a Claude Desktop reply leave the
+        # chat looking unanswered until someone opened it by hand.
+        chat_doc.is_read = 1 if is_outgoing else 0
         chat_doc.save(ignore_permissions=True)
     else:
         chat_doc = frappe.get_doc({
@@ -146,9 +206,18 @@ def last_message(doc, method):
             "mobile_no": mobile_no,
             "last_message": doc.message,
             "contact_name": mobile_no,
-            "is_read": 0
+            "is_read": 1 if is_outgoing else 0
         })
         chat_doc.save(ignore_permissions=True)
+
+    try:
+        contact_sync.apply_to_room(chat_doc, doc)
+    except Exception:
+        # A name is a nicety; never let it stop a message being recorded.
+        frappe.log_error(frappe.get_traceback(), "WhatsApp Contact Sync")
+
+    if is_outgoing:
+        mark_conversation_read(chat_doc)
 
     if chat_doc.email and doc.type != 'Outgoing':
         message_data = {

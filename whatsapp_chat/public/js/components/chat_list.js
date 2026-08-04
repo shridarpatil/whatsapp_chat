@@ -1,7 +1,12 @@
 import ChatRoom from './chat_room';
 import ChatAddRoom from './chat_add_room';
 import ChatUserSettings from './chat_user_settings';
-import { get_rooms, mark_message_read, set_notification_count } from './chat_utils';
+import {
+  get_rooms,
+  mark_message_read,
+  set_notification_count,
+  refresh_notification_count,
+} from './chat_utils';
 
 export default class ChatList {
   constructor(opts) {
@@ -63,6 +68,9 @@ export default class ChatList {
       this.rooms = res;
       this.setup_rooms();
       this.render_messages();
+      // Seed the badge from the server once the list exists, rather than
+      // counting rooms as they are constructed.
+      refresh_notification_count();
     } catch (error) {
       frappe.msgprint({
         title: __('Error'),
@@ -85,7 +93,7 @@ export default class ChatList {
         is_admin: this.is_admin,
         room: element.name,
         is_read: element.is_read,
-        room_name: element.contact_name,
+        room_name: element.display_name || element.contact_name,
         room_type: element.type,
         opposite_person_email: element.mobile_no,
       };
@@ -215,6 +223,10 @@ export default class ChatList {
         me.move_room_to_top(chat_room_item);
       } else if ($('.chat-space').is(':visible')) {
         mark_message_read(res.room);
+        // Keep the in-memory profile honest about what the server was just
+        // told. Left at 0, a later click would decrement the badge for a
+        // room that had already been counted as read.
+        chat_room_item[1].profile.is_read = 1;
       } else {
         // Chat widget is closed - update counter only if room was previously read
         if (chat_room_item[1].profile.is_read === 1) {

@@ -446,3 +446,34 @@ $height: 582px;
     border: 1px solid var(--red-avatar-color);
   }
 }
+
+// ===== iWEX Enhancements =====
+
+// Feature 5: Unread message highlight in chat list
+.chat-room--unread {
+  background-color: rgba(37, 211, 102, 0.08);
+  border-left: 3px solid #25d366;
+
+  .chat-name {
+    font-weight: 600;
+  }
+}
+
+// Feature 2: Chat image hover state (lightbox cursor)
+.chat-image {
+  cursor: zoom-in !important;
+  border-radius: 8px;
+  transition: opacity 0.15s ease;
+
+  &:hover {
+    opacity: 0.9;
+  }
+}
+
+// Feature 4: Message tick/status icons
+.message-time {
+  svg {
+    vertical-align: middle;
+    margin-left: 2px;
+  }
+}

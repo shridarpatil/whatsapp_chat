@@ -7,6 +7,7 @@
  "field_order": [
   "contact_name",
   "mobile_no",
+  "contact",
   "is_read",
   "last_message",
   "email"
@@ -22,6 +23,13 @@
    "fieldtype": "Data",
    "label": "Mobile No",
    "unique": 1
+  },
+  {
+   "description": "Matched automatically on the last 10 digits of the mobile number. Set it by hand to correct a wrong match — an existing link is never overwritten. Clear it to force a fresh match.",
+   "fieldname": "contact",
+   "fieldtype": "Link",
+   "label": "ERPNext Contact",
+   "options": "Contact"
   },
   {
    "default": "0",
