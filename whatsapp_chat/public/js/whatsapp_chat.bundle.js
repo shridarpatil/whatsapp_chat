@@ -51,9 +51,35 @@ frappe.Chat = class {
     `;
 
     if (this.is_desk === true) {
-      $('header.navbar > .container > .navbar-collapse > ul').prepend(
-        navbar_icon_html
+      const $legacy_navbar = $(
+        'header.navbar > .container > .navbar-collapse > ul'
       );
+      const $v16_navbar = $('header.navbar > div.flex');
+
+      if ($legacy_navbar.length) {
+        // v14 / v15 desk: navbar items are <li> elements inside a <ul>.
+        $legacy_navbar.prepend(navbar_icon_html);
+      } else if ($v16_navbar.length) {
+        // v16 desk: the .container / .navbar-collapse / <ul> chain is gone.
+        // Right side icons are buttons in a flex container, so the <li>
+        // markup above does not apply here.
+        const $chat_icon = $(`
+          <button class='btn-reset nav-link text-muted chat-navbar-icon'
+            title="Show Chats" aria-label="Show Chats">
+            ${frappe.utils.icon('small-message', 'md')}
+            <span class="badge" id="chat-notification-count"></span>
+          </button>
+        `);
+        const $notifications = $v16_navbar.children('.desktop-notifications');
+        if ($notifications.length) {
+          $chat_icon.insertBefore($notifications);
+        } else {
+          $v16_navbar.prepend($chat_icon);
+        }
+      } else {
+        // Unknown desk layout: fall back to the floating chat bubble.
+        $('.chat-bubble').removeClass('d-none');
+      }
     }
     this.setup_events();
   }
