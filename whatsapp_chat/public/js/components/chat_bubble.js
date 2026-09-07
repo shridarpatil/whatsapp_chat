@@ -11,7 +11,7 @@ export default class ChatBubble {
       : __('Chat With Us');
     this.closed_title = __('Close Chat');
 
-    const bubble_visible = this.parent.is_desk === true ? 'd-none' : '';
+    const bubble_visible = '';
     this.open_inner_html = `
 			<div class='p-3 chat-bubble ${bubble_visible}'>
 				<span class='chat-message-icon'>
