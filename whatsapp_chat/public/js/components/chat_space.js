@@ -9,7 +9,9 @@ import {
   is_image,
   get_avatar_html,
   mark_message_read,
-} from './chat_utils';
+  get_patient_context,
+  escape_html,
+} from "./chat_utils";
 
 export default class ChatSpace {
   constructor(opts) {
@@ -21,12 +23,14 @@ export default class ChatSpace {
   }
 
   setup() {
-    this.$chat_space = $(document.createElement('div'));
+    this.$chat_space = $(document.createElement("div"));
     this.typing = false;
-    this.$chat_space.addClass('chat-space');
+    this.$chat_space.addClass("chat-space");
     this.setup_header();
+    this.setup_loading();
+    this.render();
+    this.setup_navigation_events();
     this.fetch_and_setup_messages();
-    this.setup_socketio();
   }
 
   setup_header() {
@@ -35,26 +39,152 @@ export default class ChatSpace {
       this.profile.opposite_person_email,
       this.profile.room_name
     );
+    const room_name = escape_html(
+      __(
+        this.profile.room_name || this.profile.user_email || __("Conversation")
+      )
+    );
+    const phone_number = escape_html(this.profile.user_email || "");
     const header_html = `
-			<div class='chat-header'>
+			<header class='chat-header'>
 				${
           this.profile.is_admin === true
-            ? `<span class='chat-back-button' title='${__('Go Back')}' >
-								${frappe.utils.icon('left')}
-							</span>`
+            ? `<button type='button' class='chat-back-button'
+                title='${__("Back to conversations")}' aria-label='${__(
+                "Back to conversations"
+              )}'>
+								${frappe.utils.icon("left")}
+							</button>`
             : ``
         }
 				${this.avatar_html}
-				<div class='chat-profile-info'>
+				<div class='chat-conversation-identity'>
 					<div class='chat-profile-name'>
-					${__(this.profile.room_name)}
-					<div class='online-circle'></div>
+					${room_name}
 					</div>
-					<div class='chat-profile-status'>${__('Typing...')}</div>
+					<div class='chat-phone-number'>${phone_number}</div>
+					<div class='chat-profile-status'>${__("Typing…")}</div>
 				</div>
+			</header>
+				<div class='chat-patient-context' aria-live='polite'>
+				<span class='patient-context-loading'>${__("Checking patient record…")}</span>
 			</div>
 		`;
     this.$chat_space.append(header_html);
+    this.load_patient_context();
+  }
+
+  async load_patient_context() {
+    if (!this.profile.is_admin || !this.profile.user_email) {
+      this.$chat_space.find(".chat-patient-context").remove();
+      return;
+    }
+
+    try {
+      const context = await get_patient_context(this.profile.user_email);
+      this.render_patient_context(context.patients || []);
+    } catch (error) {
+      const $context = this.$chat_space.find(".chat-patient-context").empty();
+      $("<span>", { class: "patient-context-label" })
+        .text(__("PATIENT RECORD"))
+        .appendTo($context);
+      $("<span>", { class: "patient-context-muted" })
+        .text(__("Patient lookup unavailable"))
+        .appendTo($context);
+    }
+  }
+
+  render_patient_context(patients) {
+    const $context = this.$chat_space.find(".chat-patient-context").empty();
+    if (!patients.length) {
+      $("<span>", { class: "patient-context-label" })
+        .text(__("PATIENT RECORD"))
+        .appendTo($context);
+      $("<span>", { class: "patient-context-muted" })
+        .text(__("No patient linked to this number"))
+        .appendTo($context);
+      return;
+    }
+
+    if (patients.length === 1) {
+      const patient = patients[0];
+      const patient_url = `/clinix/patients/${encodeURIComponent(
+        patient.name
+      )}`;
+      const $profile_link = $("<a>", {
+        class: "chat-profile-name profile-patient-link",
+        href: patient_url,
+        title: __("Open patient record"),
+      });
+      $("<span>").text(patient.patient_name).appendTo($profile_link);
+      $("<span>", { class: "profile-patient-arrow", "aria-hidden": "true" })
+        .html(frappe.utils.icon("right", "sm"))
+        .appendTo($profile_link);
+      this.$chat_space.find(".chat-profile-name").replaceWith($profile_link);
+    } else {
+      this.$chat_space
+        .find(".chat-profile-name")
+        .text(__("{0} linked patients", [patients.length]));
+    }
+
+    $("<span>", { class: "patient-context-label" })
+      .text(patients.length === 1 ? __("PATIENT RECORD") : __("SHARED NUMBER"))
+      .appendTo($context);
+    const $patients = $("<div>", { class: "patient-context-patients" });
+    patients.forEach((patient) => {
+      const details = [
+        patient.age !== null && patient.age !== undefined
+          ? __("{0} years", [patient.age])
+          : null,
+        patient.gender,
+        patient.family_relation
+          ? __(patient.family_relation.replaceAll("_", " "))
+          : null,
+      ].filter(Boolean);
+      const patient_url = `/clinix/patients/${encodeURIComponent(
+        patient.name
+      )}`;
+      const $link = $("<a>", {
+        class: "patient-context-link",
+        href: patient_url,
+        title: __("Open patient record"),
+      });
+      $("<span>", { class: "patient-context-name" })
+        .text(
+          patients.length === 1
+            ? __("Open patient record")
+            : patient.patient_name
+        )
+        .appendTo($link);
+      $("<span>", { class: "patient-context-details" })
+        .text(details.join(" · "))
+        .appendTo($link);
+      $("<span>", { class: "patient-context-arrow", "aria-hidden": "true" })
+        .html(frappe.utils.icon("right", "sm"))
+        .appendTo($link);
+      $patients.append($link);
+    });
+    $context.append($patients);
+  }
+
+  setup_loading() {
+    this.$conversation_state = $(`
+      <div class='chat-conversation-state' role='status'>
+        <span class='chat-state-spinner' aria-hidden='true'></span>
+        <strong>${__("Loading messages")}</strong>
+      </div>
+    `);
+    this.$chat_space.append(this.$conversation_state);
+  }
+
+  setup_navigation_events() {
+    this.$chat_space.find(".chat-back-button").on("click", () => {
+      this.destroy_socket_events();
+      this.chat_list.active_room = null;
+      this.chat_list.active_chat_space = null;
+      this.chat_list.render_messages();
+      this.chat_list.render();
+    });
   }
 
   async fetch_and_setup_messages() {
@@ -63,24 +193,45 @@ export default class ChatSpace {
         this.profile.room,
         this.profile.user_email
       );
+      this.$conversation_state.remove();
       this.setup_messages(res);
       this.setup_actions();
-      this.render();
+      this.setup_events();
+      this.setup_socketio();
+      scroll_to_bottom(this.$chat_space_container);
 
       // Mark messages as read when viewing the chat
       // This will also send read receipts to WhatsApp if enabled in settings
       mark_message_read(this.profile.room);
     } catch (error) {
-      frappe.msgprint({
-        title: __('Error'),
-        message: __('Something went wrong. Please refresh and try again.'),
-      });
+      this.show_message_error();
     }
   }
 
+  show_message_error() {
+    this.$conversation_state
+      .html(
+        `<span class='chat-state-icon' aria-hidden='true'>${frappe.utils.icon(
+          "solid-warning",
+          "md"
+        )}</span>
+        <strong>${__("Could not load messages")}</strong>
+        <span>${__("Check your connection and try again.")}</span>
+        <button type='button' class='btn btn-default btn-sm retry-chat-messages'>
+          ${__("Try again")}
+        </button>`
+      )
+      .attr("role", "alert");
+    this.$conversation_state.find(".retry-chat-messages").on("click", () => {
+      this.$conversation_state.remove();
+      this.setup_loading();
+      this.fetch_and_setup_messages();
+    });
+  }
+
   setup_messages(messages_list) {
-    this.$chat_space_container = $(document.createElement('div'));
-    this.$chat_space_container.addClass('chat-space-container');
+    this.$chat_space_container = $(document.createElement("div"));
+    this.$chat_space_container.addClass("chat-space-container");
 
     this.make_messages_html(messages_list);
 
@@ -89,6 +240,7 @@ export default class ChatSpace {
   }
 
   make_messages_html(messages_list) {
+    messages_list = messages_list || [];
     this.prevMessage = {};
     this.message_html = ``;
     if (this.profile.message) {
@@ -100,17 +252,26 @@ export default class ChatSpace {
         this.profile.user_email
       );
     }
+    if (!messages_list.length) {
+      this.message_html = `
+        <div class='chat-empty-conversation' role='status'>
+          <strong>${__("No messages yet")}</strong>
+          <span>${__("Write a message to start this conversation.")}</span>
+        </div>
+      `;
+      return;
+    }
     messages_list.forEach((element) => {
       const date_line_html = this.make_date_line_html(element.creation);
       this.message_html += date_line_html;
 
-      let message_type = 'sender';
+      let message_type = "sender";
 
       if (element.sender_user_no === this.profile.user_email) {
-        message_type = 'recipient';
-      } else if (this.profile.room_type === 'Guest') {
-        if (this.profile.is_admin === true && element.sender !== 'Guest') {
-          message_type = 'recipient';
+        message_type = "recipient";
+      } else if (this.profile.room_type === "Guest") {
+        if (this.profile.is_admin === true && element.sender !== "Guest") {
+          message_type = "recipient";
         }
       }
       this.message_html += this.make_message(
@@ -119,7 +280,7 @@ export default class ChatSpace {
         message_type,
         element.sender,
         element.caption
-      ).prop('outerHTML');
+      ).prop("outerHTML");
 
       this.prevMessage = element;
     });
@@ -129,7 +290,7 @@ export default class ChatSpace {
     let result = `
 			<div class='date-line'>
 				<span>
-					${__(get_date_from_now(dateObj, 'space'))}
+					${__(get_date_from_now(dateObj, "space"))}
 				</span>
 			</div>
 		`;
@@ -138,32 +299,31 @@ export default class ChatSpace {
     } else if (is_date_change(dateObj, this.prevMessage.creation)) {
       return result;
     } else {
-      return '';
+      return "";
     }
   }
 
   setup_actions() {
-    this.$chat_actions = $(document.createElement('div'));
-    this.$chat_actions.addClass('chat-space-actions');
+    this.$chat_actions = $(document.createElement("div"));
+    this.$chat_actions.addClass("chat-space-actions");
     const chat_actions_html = `
-			<span class='open-attach-items'>
-				${frappe.utils.icon('attachment', 'lg')}
-			</span>
+			<button type='button' class='chat-composer-button open-attach-items'
+				title='${__("Attach file")}' aria-label='${__("Attach file")}'>
+				${frappe.utils.icon("attachment", "lg")}
+			</button>
 			<input type='file' id='chat-file-uploader'
 				accept='image/*, application/pdf, .doc, .docx'
 				style='display: none;'
 			>
-			<input class='form-control type-message'
-				type='search'
-				placeholder='${__('Type message')}'
-			>
-			<div>
-				<span class='message-send-button'>
+			<textarea class='form-control type-message' rows='1'
+				aria-label='${__("Message")}'
+				placeholder='${__("Write a message…")}'></textarea>
+			<button type='button' class='message-send-button'
+				title='${__("Send message")}' aria-label='${__("Send message")}' disabled>
 					<svg xmlns="http://www.w3.org/2000/svg" width="1.1rem" height="1.1rem" viewBox="0 0 24 24">
 						<path d="M24 0l-6 22-8.129-7.239 7.802-8.234-10.458 7.227-7.215-1.754 24-12zm-15 16.668v7.332l3.258-4.431-3.258-2.901z"/>
 					</svg>
-				</span>
-			</div>
+			</button>
 		`;
     this.$chat_actions.html(chat_actions_html);
     this.$chat_space.append(this.$chat_actions);
@@ -181,12 +341,12 @@ export default class ChatSpace {
     return new Promise((resolve, reject) => {
       let xhr = new XMLHttpRequest();
 
-      xhr.upload.addEventListener('load', () => {
+      xhr.upload.addEventListener("load", () => {
         resolve();
       });
 
-      xhr.addEventListener('error', () => {
-        reject(frappe.throw(__('Internal Server Error')));
+      xhr.addEventListener("error", () => {
+        reject(frappe.throw(__("Internal Server Error")));
       });
       xhr.onreadystatechange = () => {
         if (xhr.readyState == XMLHttpRequest.DONE) {
@@ -195,7 +355,7 @@ export default class ChatSpace {
             let file_doc = null;
             try {
               r = JSON.parse(xhr.responseText);
-              if (r.message.doctype === 'File') {
+              if (r.message.doctype === "File") {
                 file_doc = r.message;
               }
             } catch (e) {
@@ -203,7 +363,7 @@ export default class ChatSpace {
             }
             try {
               if (file_doc === null) {
-                reject(frappe.throw(__('File upload failed!')));
+                reject(frappe.throw(__("File upload failed!")));
               }
               me.handle_send_message(file_doc.file_url);
             } catch (error) {
@@ -222,80 +382,69 @@ export default class ChatSpace {
         }
       };
 
-      xhr.open('POST', '/api/method/upload_file', true);
-      xhr.setRequestHeader('Accept', 'application/json');
-      xhr.setRequestHeader('X-Frappe-CSRF-Token', frappe.csrf_token);
+      xhr.open("POST", "/api/method/upload_file", true);
+      xhr.setRequestHeader("Accept", "application/json");
+      xhr.setRequestHeader("X-Frappe-CSRF-Token", frappe.csrf_token);
 
       let form_data = new FormData();
 
-      form_data.append('file', file.file_obj, file.name);
-      form_data.append('is_private', +false);
+      form_data.append("file", file.file_obj, file.name);
+      form_data.append("is_private", +false);
 
-      form_data.append('doctype', 'WhatsApp Contact');
-      form_data.append('docname', this.profile.room);
-      form_data.append('optimize', +true);
+      form_data.append("doctype", "WhatsApp Contact");
+      form_data.append("docname", this.profile.room);
+      form_data.append("optimize", +true);
       xhr.send(form_data);
     });
   }
 
   setup_events() {
-    const me = this;
-
-    //Timeout function
-    me.typing_timeout = () => {
-      me.typing = false;
+    this.typing_timeout = () => {
+      this.typing = false;
     };
 
-    $('.chat-back-button').on('click', function () {
-      me.chat_list.render_messages();
-      me.chat_list.render();
+    this.$chat_space.find(".open-attach-items").on("click", () => {
+      this.$chat_space.find("#chat-file-uploader").trigger("click");
     });
 
-    $('.open-attach-items').on('click', function () {
-      $('#chat-file-uploader').click();
-    });
-
-    $('#chat-file-uploader').on('change', function () {
-      if (this.files.length > 0) {
-        me.file = {};
-        me.file.file_obj = this.files[0];
-        me.handle_upload_file(me.file);
-        me.file = null;
+    this.$chat_space.find("#chat-file-uploader").on("change", (event) => {
+      if (event.currentTarget.files.length > 0) {
+        this.file = { file_obj: event.currentTarget.files[0] };
+        this.handle_upload_file(this.file);
+        this.file = null;
       }
     });
 
-    $('.message-send-button').on('click', function () {
-      me.handle_send_message();
+    this.$chat_space.find(".message-send-button").on("click", () => {
+      this.handle_send_message();
     });
 
-    $('.type-message').keydown(function (e) {
-      if (e.which === 13) {
-        me.handle_send_message();
+    const $message_input = this.$chat_space.find(".type-message");
+    $message_input.on("input", () => this.update_send_state());
+    $message_input.on("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        this.handle_send_message();
       }
     });
   }
 
   setup_socketio() {
-    const me = this;
-    // Track received message IDs to prevent duplicates
     this.received_message_ids = new Set();
-
-    // Listen for room-specific messages
-    frappe.realtime.on(this.profile.room, function (res) {
-      me.handle_incoming_message(res);
-    });
-
-    // Also listen for latest_chat_updates and filter by room
-    frappe.realtime.on('latest_chat_updates', function (res) {
-      if (res.room === me.profile.room) {
-        me.handle_incoming_message(res);
+    this.room_event_handler = (res) => this.handle_incoming_message(res);
+    this.latest_event_handler = (res) => {
+      if (res.room === this.profile.room) {
+        this.handle_incoming_message(res);
       }
-    });
+    };
+    frappe.realtime.on(this.profile.room, this.room_event_handler);
+    frappe.realtime.on("latest_chat_updates", this.latest_event_handler);
   }
 
   handle_incoming_message(res) {
     // Create a unique ID for the message to prevent duplicates
-    const msg_id = res.name || `${res.content}-${res.creation}-${res.sender_user_no}`;
+    const msg_id =
+      res.name || `${res.content}-${res.creation}-${res.sender_user_no}`;
 
     // Skip if we've already processed this message
     if (this.received_message_ids.has(msg_id)) {
@@ -311,24 +460,28 @@ export default class ChatSpace {
   }
 
   destroy_socket_events() {
-    frappe.realtime.off(this.profile.room);
-    frappe.realtime.off('latest_chat_updates');
+    if (this.room_event_handler) {
+      frappe.realtime.off(this.profile.room, this.room_event_handler);
+    }
+    if (this.latest_event_handler) {
+      frappe.realtime.off("latest_chat_updates", this.latest_event_handler);
+    }
   }
 
   get_typing_changes(res) {
     if (res.user != this.profile.user_email) {
       if (
-        (this.profile.is_admin === true && res.is_guest === 'true') ||
+        (this.profile.is_admin === true && res.is_guest === "true") ||
         this.profile.is_admin === false ||
-        this.profile.room_type === 'Group' ||
-        this.profile.room_type === 'Direct'
+        this.profile.room_type === "Group" ||
+        this.profile.room_type === "Direct"
       ) {
-        if (res.is_typing === 'false') {
-          $('.chat-profile-status').css('visibility', 'hidden');
+        if (res.is_typing === "false") {
+          $(".chat-profile-status").css("visibility", "hidden");
         } else {
-          $('.chat-profile-status').css('visibility', 'visible');
+          $(".chat-profile-status").css("visibility", "visible");
           const timeout = setTimeout(() => {
-            $('.chat-profile-status').css('visibility', 'hidden');
+            $(".chat-profile-status").css("visibility", "hidden");
           }, 3000);
         }
       }
@@ -336,61 +489,63 @@ export default class ChatSpace {
   }
 
   make_message(content, time, type, name, caption) {
+    content = String(content || "");
     const message_class =
-      type === 'recipient' ? 'recipient-message' : 'sender-message';
-    const $recipient_element = $(document.createElement('div')).addClass(
+      type === "recipient" ? "recipient-message" : "sender-message";
+    const $recipient_element = $(document.createElement("div")).addClass(
       message_class
     );
-    const $message_element = $(document.createElement('div')).addClass(
-      'message-bubble'
+    const $message_element = $(document.createElement("div")).addClass(
+      "message-bubble"
     );
 
-    const $name_element = $(document.createElement('div'))
-      .addClass('message-name')
+    const $name_element = $(document.createElement("div"))
+      .addClass("message-name")
       .text(name);
 
-    const n = content.lastIndexOf('/');
-    const file_name = content.substring(n + 1) || '';
+    const n = content.lastIndexOf("/");
+    const file_name = content.substring(n + 1) || "";
     let $sanitized_content;
 
-    if (content.startsWith('/files/') && file_name !== '') {
+    if (content.startsWith("/files/") && file_name !== "") {
       let $url;
       if (is_image(file_name)) {
-        $url = $(document.createElement('img'));
-        $url.attr({ src: content }).addClass('img-responsive chat-image');
-        $message_element.css({ padding: '0px', background: 'inherit' });
+        $url = $(document.createElement("img"));
+        $url.attr({ src: content }).addClass("img-responsive chat-image");
+        $message_element.css({ padding: "0px", background: "inherit" });
         $name_element.css({
-          color: 'var(--text-muted)',
-          'padding-bottom': 'var(--padding-xs)',
+          color: "var(--text-muted)",
+          "padding-bottom": "var(--padding-xs)",
         });
       } else {
-        $url = $(document.createElement('a'));
-        $url.attr({ href: content, target: '_blank' }).text(__(file_name));
+        $url = $(document.createElement("a"));
+        $url.attr({ href: content, target: "_blank" }).text(__(file_name));
 
-        if (type === 'sender') {
-          $url.css('color', 'var(--cyan-100)');
+        if (type === "sender") {
+          $url.css("color", "var(--cyan-100)");
         }
       }
       $sanitized_content = $url;
     } else {
-      $sanitized_content = __($('<div>').text(content).html());
+      $sanitized_content = __($("<div>").text(content).html());
     }
 
-    if (type === 'sender' && this.profile.room_type === 'Group') {
+    if (type === "sender" && this.profile.room_type === "Group") {
       $message_element.append($name_element);
     }
     $message_element.append($sanitized_content);
 
     // Add caption below image/media if present
     if (caption) {
-      const $caption_element = $(document.createElement('div'))
-        .addClass('message-caption')
+      const $caption_element = $(document.createElement("div"))
+        .addClass("message-caption")
         .css({
-          'padding': 'var(--padding-sm)',
-          'font-size': 'var(--text-sm)',
-          'color': type === 'sender' ? 'var(--white)' : 'var(--text-color)',
-          'background': type === 'sender' ? 'var(--primary-color)' : 'var(--control-bg)',
-          'border-radius': '0 0 13px 13px',
+          padding: "var(--padding-sm)",
+          "font-size": "var(--text-sm)",
+          color: type === "sender" ? "var(--white)" : "var(--text-color)",
+          background:
+            type === "sender" ? "var(--primary-color)" : "var(--control-bg)",
+          "border-radius": "0 0 13px 13px",
         })
         .text(caption);
       $message_element.append($caption_element);
@@ -402,19 +557,25 @@ export default class ChatSpace {
     return $recipient_element;
   }
 
-  handle_send_message(attachment) {
-    const $type_message = $('.type-message');
-    let content = null;
+  update_send_state() {
+    const has_message = Boolean(
+      String(this.$chat_space.find(".type-message").val() || "").trim()
+    );
+    this.$chat_space
+      .find(".message-send-button")
+      .prop("disabled", !has_message || this.sending);
+  }
 
-    if (attachment) {
-      content = attachment;
-    } else {
-      content = $type_message.val();
-    }
-
-    if (content.length === 0) {
+  async handle_send_message(attachment) {
+    const $type_message = this.$chat_space.find(".type-message");
+    const content = attachment || String($type_message.val() || "").trim();
+    if (!content || this.sending) {
       return;
     }
+
+    this.sending = true;
+    this.update_send_state();
+    this.$chat_space.find(".chat-space-actions").addClass("is-sending");
     this.typing = false;
     if (this.timeout) {
       clearTimeout(this.timeout);
@@ -424,44 +585,64 @@ export default class ChatSpace {
       this.profile.is_admin === true &&
       frappe.Chat.settings.user.enable_message_tone === 1
     ) {
-      frappe.utils.play_sound('chat-message-send');
+      frappe.utils.play_sound("chat-message-send");
     }
 
-    this.$chat_space_container.append(
-      this.make_message(content, get_time(), 'recipient', this.profile.user)
-    );
-    $type_message.val('');
-    scroll_to_bottom(this.$chat_space_container);
-    send_message(
-      content,
-      this.profile.user,
-      this.profile.room,
-      this.profile.user_email,
-      attachment
-    );
+    try {
+      await send_message(
+        content,
+        this.profile.user,
+        this.profile.room,
+        this.profile.user_email,
+        attachment
+      );
+      this.$chat_space_container.find(".chat-empty-conversation").remove();
+      this.$chat_space_container.append(
+        this.make_message(content, get_time(), "recipient", this.profile.user)
+      );
+      $type_message.val("");
+      scroll_to_bottom(this.$chat_space_container);
+    } catch (error) {
+      frappe.msgprint({
+        title: __("Message not sent"),
+        message: __(
+          "Your message is still here. Check your connection and try again."
+        ),
+        indicator: "red",
+      });
+    } finally {
+      this.sending = false;
+      this.$chat_space.find(".chat-space-actions").removeClass("is-sending");
+      this.update_send_state();
+    }
   }
 
   receive_message(res, time) {
-    let chat_type = 'sender';
+    res.content = String(res.content || "");
+    let chat_type = "sender";
     // Skip if this is our own outgoing message (sender_user_no would be empty or 'Administrator' for outgoing)
-    if (res.sender_user_no === 'Administrator' || res.sender_user_no === this.profile.user) {
+    if (
+      res.sender_user_no === "Administrator" ||
+      res.sender_user_no === this.profile.user
+    ) {
       return;
     }
 
     if (
       this.profile.is_admin === true &&
-      $('.chat-element').is(':visible') &&
+      $(".chat-element").is(":visible") &&
       frappe.Chat.settings.user.enable_message_tone === 1
     ) {
-      frappe.utils.play_sound('chat-message-receive');
+      frappe.utils.play_sound("chat-message-receive");
     }
 
-    if (this.profile.room_type === 'Guest') {
-      if (this.profile.is_admin === true && res.user !== 'Guest') {
-        chat_type = 'recipient';
+    if (this.profile.room_type === "Guest") {
+      if (this.profile.is_admin === true && res.user !== "Guest") {
+        chat_type = "recipient";
       }
     }
 
+    this.$chat_space_container.find(".chat-empty-conversation").remove();
     this.$chat_space_container.append(
       this.make_message(res.content, time, chat_type, res.user)
     );
@@ -470,8 +651,5 @@ export default class ChatSpace {
 
   render() {
     this.$wrapper.html(this.$chat_space);
-    this.setup_events();
-
-    scroll_to_bottom(this.$chat_space_container);
   }
 }

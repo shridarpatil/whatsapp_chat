@@ -1,4 +1,4 @@
-import moment from 'moment';
+import moment from "moment";
 
 function get_time(time) {
   let current_time;
@@ -7,15 +7,15 @@ function get_time(time) {
   } else {
     current_time = moment();
   }
-  return current_time.format('h:mm A');
+  return current_time.format("h:mm A");
 }
 
 function get_date_from_now(dateObj, type) {
-  const sameDay = type === 'space' ? '[Today]' : 'h:mm A';
-  const elseDay = type === 'space' ? 'MMM D, YYYY' : 'DD/MM/YYYY';
+  const sameDay = type === "space" ? "[Today]" : "h:mm A";
+  const elseDay = type === "space" ? "MMM D, YYYY" : "DD/MM/YYYY";
   const result = moment(dateObj).calendar(null, {
     sameDay: sameDay,
-    lastDay: '[Yesterday]',
+    lastDay: "[Yesterday]",
     lastWeek: elseDay,
     sameElse: elseDay,
   });
@@ -23,8 +23,8 @@ function get_date_from_now(dateObj, type) {
 }
 
 function is_date_change(dateObj, prevObj) {
-  const curDate = moment(dateObj).format('DD/MM/YYYY');
-  const prevDate = moment(prevObj).format('DD/MM/YYYY');
+  const curDate = moment(dateObj).format("DD/MM/YYYY");
+  const prevDate = moment(prevObj).format("DD/MM/YYYY");
   return curDate !== prevDate;
 }
 
@@ -47,8 +47,8 @@ function is_image(filename) {
 
 async function get_rooms(email) {
   const res = await frappe.call({
-    type: 'GET',
-    method: 'whatsapp_chat.api.contacts.get',
+    type: "GET",
+    method: "whatsapp_chat.api.contacts.get",
     args: {
       email: email,
     },
@@ -58,7 +58,7 @@ async function get_rooms(email) {
 
 async function get_messages(room, user_no) {
   const res = await frappe.call({
-    method: 'whatsapp_chat.api.message.get_all',
+    method: "whatsapp_chat.api.message.get_all",
     args: {
       room: room,
       user_no: user_no,
@@ -67,30 +67,32 @@ async function get_messages(room, user_no) {
   return await res.message;
 }
 
+async function get_patient_context(phone_number) {
+  const res = await frappe.call({
+    type: "GET",
+    method: "clinix.api.whatsapp_chat.get_patient_context",
+    args: { phone_number },
+  });
+  return res.message || { patients: [] };
+}
+
 async function send_message(content, user, room, user_no, attachment) {
-  try {
-    await frappe.call({
-      method: 'whatsapp_chat.api.message.send',
-      args: {
-        content: content,
-        user: user,
-        room: room,
-        user_no: user_no,
-        attachment: attachment
-      },
-    });
-  } catch (error) {
-    frappe.msgprint({
-      title: __('Error'),
-      message: __('Something went wrong. Please refresh and try again.'),
-    });
-  }
+  return frappe.call({
+    method: "whatsapp_chat.api.message.send",
+    args: {
+      content,
+      user,
+      room,
+      user_no,
+      attachment,
+    },
+  });
 }
 
 async function get_settings(token) {
   const res = await frappe.call({
-    type: 'GET',
-    method: 'whatsapp_chat.api.config.settings',
+    type: "GET",
+    method: "whatsapp_chat.api.config.settings",
     args: {
       token: token,
     },
@@ -101,7 +103,7 @@ async function get_settings(token) {
 async function mark_message_read(room) {
   try {
     await frappe.call({
-      method: 'whatsapp_chat.api.message.mark_as_read',
+      method: "whatsapp_chat.api.message.mark_as_read",
       args: {
         room: room,
       },
@@ -111,10 +113,9 @@ async function mark_message_read(room) {
   }
 }
 
-
 async function create_guest({ email, full_name, message }) {
   const res = await frappe.call({
-    method: 'chat.api.user.get_guest_room',
+    method: "chat.api.user.get_guest_room",
     args: {
       email: email,
       full_name: full_name,
@@ -127,7 +128,7 @@ async function create_guest({ email, full_name, message }) {
 async function set_typing(room, user, is_typing, is_guest) {
   try {
     await frappe.call({
-      method: 'whatsapp_chat.api.message.set_typing',
+      method: "whatsapp_chat.api.message.set_typing",
       args: {
         room: room,
         user: user,
@@ -142,18 +143,18 @@ async function set_typing(room, user, is_typing, is_guest) {
 
 async function create_private_room(contact_name, mobile_no, email) {
   await frappe.call({
-    method: 'whatsapp_chat.api.contacts.create',
+    method: "whatsapp_chat.api.contacts.create",
     args: {
       contact_name: contact_name,
       mobile_no: mobile_no,
-      email: email
+      email: email,
     },
   });
 }
 
 async function set_user_settings(settings) {
   await frappe.call({
-    method: 'chat.api.config.user_settings',
+    method: "chat.api.config.user_settings",
     args: {
       settings: settings,
     },
@@ -162,26 +163,33 @@ async function set_user_settings(settings) {
 
 function get_avatar_html(room_type, user_email, room_name) {
   let avatar_html;
-  if (room_type === 'Direct' && 'desk' in frappe) {
-    avatar_html = frappe.avatar(user_email, 'avatar-medium');
+  if (room_type === "Direct" && "desk" in frappe) {
+    avatar_html = frappe.avatar(user_email, "avatar-medium");
   } else {
-    avatar_html = frappe.get_avatar('avatar-medium', room_name);
+    avatar_html = frappe.get_avatar("avatar-medium", room_name);
   }
   return avatar_html;
 }
 
+function escape_html(value) {
+  return $("<div>")
+    .text(value || "")
+    .html();
+}
+
 function set_notification_count(type) {
   const current_count = frappe.Chat.settings.unread_count;
-  if (type === 'increment') {
-    $('#chat-notification-count').text(current_count + 1);
+  if (type === "increment") {
+    $("#chat-notification-count").text(current_count + 1);
     frappe.Chat.settings.unread_count += 1;
   } else {
-    if (current_count - 1 === 0) {
-      $('#chat-notification-count').text('');
+    const next_count = Math.max(0, current_count - 1);
+    if (next_count === 0) {
+      $("#chat-notification-count").text("");
     } else {
-      $('#chat-notification-count').text(current_count - 1);
+      $("#chat-notification-count").text(next_count);
     }
-    frappe.Chat.settings.unread_count -= 1;
+    frappe.Chat.settings.unread_count = next_count;
   }
 }
 
@@ -190,6 +198,7 @@ export {
   scroll_to_bottom,
   get_rooms,
   get_messages,
+  get_patient_context,
   get_settings,
   create_guest,
   send_message,
@@ -201,5 +210,6 @@ export {
   create_private_room,
   set_user_settings,
   get_avatar_html,
+  escape_html,
   set_notification_count,
 };

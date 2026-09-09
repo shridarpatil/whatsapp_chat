@@ -1,5 +1,5 @@
-import { create_guest } from './chat_utils';
-import ChatSpace from './chat_space';
+import { create_guest } from "./chat_utils";
+import ChatSpace from "./chat_space";
 
 export default class ChatForm {
   constructor(opts) {
@@ -9,14 +9,14 @@ export default class ChatForm {
   }
 
   setup() {
-    this.$chat_form = $(document.createElement('div'));
-    this.$chat_form.addClass('chat-form');
+    this.$chat_form = $(document.createElement("div"));
+    this.$chat_form.addClass("chat-form");
     this.setup_header();
     this.setup_form();
   }
 
   setup_header() {
-    this.avatar_html = frappe.avatar(null, 'avatar-medium', this.profile.name);
+    this.avatar_html = frappe.avatar(null, "avatar-medium", this.profile.name);
     const header_html = `
 			<div class='chat-header mb-2'>
 				${this.avatar_html}
@@ -25,7 +25,7 @@ export default class ChatForm {
 						${__(this.profile.name)}
 						<div class='online-circle'></div>
 					</div>
-					<div class='chat-profile-status'>${__('Typically replies in a few hours')}</div>
+					<div class='chat-profile-status'>${__("Typically replies in a few hours")}</div>
 				</div>
 			</div>
 		`;
@@ -35,33 +35,33 @@ export default class ChatForm {
   setup_form() {
     const form_html = `
 			<div class='chat-form-container'>
-				<p class='chat-query-heading'>${__('Share your queries or comments here.')}</p>
+				<p class='chat-query-heading'>${__("Share your queries or comments here.")}</p>
 				<form>
 					<div class='form-group'>
-						<label class='form-label'>${__('Full Name')}</label>
+						<label class='form-label'>${__("Full Name")}</label>
 						<input type='text' class='form-control' id='chat-fullname' 
-							placeholder='${__('Please enter your full name')}'>
+							placeholder='${__("Please enter your full name")}'>
 					</div>
 					<div class='form-group'>
-						<label class='form-label'>${__('Email Address')}</label>
+						<label class='form-label'>${__("Email Address")}</label>
 						<input type='email' class='form-control' id='chat-email' 
-							placeholder='${__('Please enter your email')}'>
+							placeholder='${__("Please enter your email")}'>
 					</div>
 					<div class='form-group'>
-						<label class='form-label'>${__('Message')}</label>
+						<label class='form-label'>${__("Message")}</label>
 						<textarea class='form-control' id='chat-message-area' 
-							placeholder='${__('Please enter your message')}'></textarea>
+							placeholder='${__("Please enter your message")}'></textarea>
 					</div>
 					<button type='button' class='btn btn-primary w-100'
 						id='submit-form'>
-            ${__('Submit')}
+            ${__("Submit")}
           </button>
 				</form>
 			</div>
 		`;
     const footer_html = `
       <a class='chat-footer' target='_blank' href='https://frappeframework.com/'>
-        ${__('⚡ Powered by Frappe')}
+        ${__("Powered by Frappe")}
       </a>
     `;
     this.$chat_form.append(form_html + footer_html);
@@ -69,9 +69,9 @@ export default class ChatForm {
 
   get_values() {
     const result = {
-      email: $('#chat-email').val(),
-      full_name: $('#chat-fullname').val(),
-      message: $('#chat-message-area').val(),
+      email: $("#chat-email").val(),
+      full_name: $("#chat-fullname").val(),
+      message: $("#chat-message-area").val(),
     };
     return result;
   }
@@ -90,7 +90,7 @@ export default class ChatForm {
         sender: res.guest_name,
         sender_email: res.email,
       };
-      localStorage.setItem('guest_token', res.token);
+      localStorage.setItem("guest_token", res.token);
 
       let profile = {
         room_name: this.profile.name,
@@ -114,7 +114,7 @@ export default class ChatForm {
   render() {
     this.$wrapper.html(this.$chat_form);
     const me = this;
-    $('#submit-form').on('click', function () {
+    $("#submit-form").on("click", function () {
       me.validate_form();
     });
   }

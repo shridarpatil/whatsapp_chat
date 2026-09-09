@@ -8,9 +8,9 @@ import {
   ChatWelcome,
   get_settings,
   scroll_to_bottom,
-} from './components';
-frappe.provide('frappe.Chat');
-frappe.provide('frappe.Chat.settings');
+} from "./components";
+frappe.provide("frappe.Chat");
+frappe.provide("frappe.Chat.settings");
 
 /** Spawns a chat widget on any web page */
 frappe.Chat = class {
@@ -20,21 +20,28 @@ frappe.Chat = class {
 
   /** Create all the required elements for chat widget */
   create_app() {
-    this.$app_element = $(document.createElement('div'));
-    this.$app_element.addClass('chat-app');
-    this.$chat_container = $(document.createElement('div'));
-    this.$chat_container.addClass('chat-container');
-    $('body').append(this.$app_element);
+    this.$app_element = $(document.createElement("div"));
+    this.$app_element.addClass("chat-app");
+    this.$chat_container = $(document.createElement("div"));
+    this.$chat_container.addClass("chat-container");
+    $("body").append(this.$app_element);
     this.is_open = false;
 
-    this.$chat_element = $(document.createElement('div'))
-      .addClass('chat-element')
+    this.$chat_element = $(document.createElement("div"))
+      .addClass("chat-element")
+      .attr({
+        id: "whatsapp-chat-panel",
+        role: "dialog",
+        "aria-label": __("WhatsApp patient messages"),
+        "aria-hidden": "true",
+      })
       .hide();
 
     this.$chat_element.append(`
-			<span class="chat-cross-button">
-				${frappe.utils.icon('close', 'lg')}
-			</span>
+			<button type="button" class="chat-cross-button"
+				aria-label="${__("Close chat")}">
+				${frappe.utils.icon("close", "lg")}
+			</button>
 		`);
     this.$chat_element.append(this.$chat_container);
     this.$chat_element.appendTo(this.$app_element);
@@ -44,14 +51,14 @@ frappe.Chat = class {
 
     const navbar_icon_html = `
         <li class='nav-item dropdown dropdown-notifications 
-          dropdown-mobile chat-navbar-icon' title="Show Chats" >
-          ${frappe.utils.icon('small-message', 'md')}
+          dropdown-mobile chat-navbar-icon' title="${__("Messages")}" >
+          ${frappe.utils.icon("small-message", "md")}
           <span class="badge" id="chat-notification-count"></span>
         </li>
     `;
 
     if (this.is_desk === true) {
-      $('header.navbar > .container > .navbar-collapse > ul').prepend(
+      $("header.navbar > .container > .navbar-collapse > ul").prepend(
         navbar_icon_html
       );
     }
@@ -61,10 +68,10 @@ frappe.Chat = class {
   /** Load dependencies and fetch the settings */
   async setup_app() {
     try {
-      const token = localStorage.getItem('guest_token') || '';
+      const token = localStorage.getItem("guest_token") || "";
       const res = await get_settings(token);
       this.is_admin = res.is_admin;
-      this.is_desk = 'desk' in frappe;
+      this.is_desk = "desk" in frappe;
 
       if (res.enable_chat === false || (!this.is_desk && this.is_admin)) {
         return;
@@ -118,8 +125,9 @@ frappe.Chat = class {
   /** Shows the chat widget */
   show_chat_widget() {
     this.is_open = true;
+    this.$chat_element.attr("aria-hidden", "false");
     this.$chat_element.fadeIn(250);
-    if (typeof this.chat_space !== 'undefined') {
+    if (typeof this.chat_space !== "undefined") {
       scroll_to_bottom(this.chat_space.$chat_space_container);
     }
   }
@@ -127,13 +135,14 @@ frappe.Chat = class {
   /** Hides the chat widget */
   hide_chat_widget() {
     this.is_open = false;
+    this.$chat_element.attr("aria-hidden", "true");
     this.$chat_element.fadeOut(300);
   }
 
   should_close(e) {
-    const chat_app = $('.chat-app');
-    const navbar = $('.navbar');
-    const modal = $('.modal');
+    const chat_app = $(".chat-app");
+    const navbar = $(".navbar");
+    const modal = $(".modal");
     return (
       !chat_app.is(e.target) &&
       chat_app.has(e.target).length === 0 &&
@@ -146,13 +155,20 @@ frappe.Chat = class {
 
   setup_events() {
     const me = this;
-    $('.chat-navbar-icon').on('click', function () {
+    $(".chat-navbar-icon").on("click", function () {
       me.chat_bubble.change_bubble();
     });
 
     $(document).mouseup(function (e) {
       if (me.should_close(e) && me.is_open === true) {
         me.chat_bubble.change_bubble();
+      }
+    });
+
+    $(document).on("keydown.whatsapp-chat", function (e) {
+      if (e.key === "Escape" && me.is_open === true) {
+        me.chat_bubble.change_bubble();
+        me.chat_bubble.$chat_bubble.trigger("focus");
       }
     });
   }
