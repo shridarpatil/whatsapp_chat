@@ -1,0 +1,54 @@
+{
+ "actions": [],
+ "creation": "2026-11-24 12:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enable_chat",
+  "form_button_section",
+  "form_button_doctypes"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "description": "Show the chat launcher in Desk. Only users who can read WhatsApp Contact get it; grant the role in Role Permission Manager.",
+   "fieldname": "enable_chat",
+   "fieldtype": "Check",
+   "label": "Enable Chat"
+  },
+  {
+   "fieldname": "form_button_section",
+   "fieldtype": "Section Break",
+   "label": "Open Chat from Forms"
+  },
+  {
+   "default": "Contact\nLead",
+   "description": "One DocType per line. Their forms get a WhatsApp Chat button that opens the conversation for the phone numbers on the record.",
+   "fieldname": "form_button_doctypes",
+   "fieldtype": "Small Text",
+   "label": "DocTypes with a Chat Button"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-24 12:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Whatsapp Chat",
+ "name": "WhatsApp Chat Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -198,7 +198,7 @@ export default class ChatList {
         'open-chat': function() {
           // Open chat widget if closed
           if (!$('.chat-element').is(':visible')) {
-            $('.chat-navbar-icon').click();
+            frappe.Chat.instance.chat_bubble.change_bubble();
           }
           // Open the specific chat room after a small delay for widget to open
           setTimeout(() => {

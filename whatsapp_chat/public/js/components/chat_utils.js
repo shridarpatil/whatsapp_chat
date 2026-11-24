@@ -56,6 +56,14 @@ async function get_rooms(email) {
   return await res.message;
 }
 
+async function get_or_create_contact(mobile_no, contact_name) {
+  const res = await frappe.call({
+    method: 'whatsapp_chat.api.contacts.get_or_create_for_number',
+    args: { mobile_no, contact_name },
+  });
+  return res.message;
+}
+
 async function get_messages(room, user_no) {
   const res = await frappe.call({
     method: 'whatsapp_chat.api.message.get_all',
@@ -173,13 +181,13 @@ function get_avatar_html(room_type, user_email, room_name) {
 function set_notification_count(type) {
   const current_count = frappe.Chat.settings.unread_count;
   if (type === 'increment') {
-    $('#chat-notification-count').text(current_count + 1);
+    $('.chat-notification-count').text(current_count + 1);
     frappe.Chat.settings.unread_count += 1;
   } else {
     if (current_count - 1 === 0) {
-      $('#chat-notification-count').text('');
+      $('.chat-notification-count').text('');
     } else {
-      $('#chat-notification-count').text(current_count - 1);
+      $('.chat-notification-count').text(current_count - 1);
     }
     frappe.Chat.settings.unread_count -= 1;
   }
@@ -190,6 +198,7 @@ export {
   scroll_to_bottom,
   get_rooms,
   get_messages,
+  get_or_create_contact,
   get_settings,
   create_guest,
   send_message,
