@@ -11,9 +11,11 @@ $font-size-6xl: 4rem;
 $padding-chat-lr: 12px;
 $height: 582px;
 
+// The window never grows past the viewport (small laptop screens, zoomed-in browsers).
+$chat-height: min(#{$height}, calc(100vh - 64px));
+
 @function calc_height($height, $offset) {
-  $result: $height - 16px - 39px - 3.5px - 33px - $offset;
-  @return $result;
+  @return calc(#{$chat-height} - #{16px + 39px + 3.5px + 33px + $offset});
 }
 
 .chat-app {
@@ -48,7 +50,7 @@ $height: 582px;
 }
 
 .chat-element {
-  height: $height;
+  height: $chat-height;
   width: 100%;
   position: relative;
   box-shadow: 0px 2px 6px rgba(17, 43, 66, 0.08),
@@ -435,6 +437,20 @@ $height: 582px;
 
 .chat-navbar-icon {
   cursor: pointer;
+  // Frappe v16 sidebar row / dock button: the unread count sits in the row's suffix.
+  .chat-notification-count:empty {
+    display: none;
+  }
+  .sidebar-item-suffix .chat-notification-count {
+    min-width: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: var(--text-xs, 11px);
+    line-height: 18px;
+    text-align: center;
+    background: var(--red-avatar-color, var(--red-500));
+    color: var(--white, #fff);
+  }
   .badge {
     background: var(--red-avatar-color);
     color: var(--bg-color);

@@ -39,41 +39,47 @@ def get_admin_name(user_key):
     full_name = frappe.db.get_value('User', user_key, 'full_name')
     return full_name
 
+DEFAULT_FORM_DOCTYPES = ["Contact", "Lead"]
+
+
+def _get_settings_doc():
+    """WhatsApp Chat Settings, or None before the doctype is migrated."""
+    try:
+        return frappe.get_cached_doc("WhatsApp Chat Settings")
+    except frappe.DoesNotExistError:
+        return None
+
+
 def get_chat_settings():
     """Get the chat settings
+
+    Chat is on when it is enabled in WhatsApp Chat Settings (the default) and,
+    for Desk users, when the user may read WhatsApp Contact. Grant access with
+    Role Permission Manager instead of giving it to everyone.
+
     Returns:
         dict: Dictionary containing chat settings.
     """
-    # chat_settings = frappe.get_cached_doc('Chat Settings')
-    # user_roles = frappe.get_roles()
+    settings = _get_settings_doc()
+    enabled = True if settings is None else bool(settings.enable_chat)
 
-    # allowed_roles = [u.role for u in chat_settings.allowed_roles]
-    # allowed_roles.extend(['System Manager', 'Administrator'])
-    result = {
-        'enable_chat': False
+    if frappe.session.user != "Guest":
+        enabled = enabled and bool(frappe.has_permission("WhatsApp Contact", "read"))
+
+    form_doctypes = DEFAULT_FORM_DOCTYPES
+    if settings is not None and settings.form_button_doctypes is not None:
+        form_doctypes = [
+            d.strip() for d in settings.form_button_doctypes.splitlines() if d.strip()
+        ]
+
+    return {
+        "enable_chat": enabled,
+        "chat_status": "Online",
+        "form_doctypes": form_doctypes,
+        "can_create_contact": bool(frappe.has_permission("WhatsApp Contact", "create"))
+        if frappe.session.user != "Guest"
+        else False,
     }
-
-    # if frappe.session.user == 'Guest':
-    #     result['enable_chat'] = True
-
-    # if not chat_settings.enable_chat or not has_common(allowed_roles, user_roles):
-    #     return result
-
-    # chat_settings.chat_operators = [co.user for co in chat_settings.chat_operators]
-
-    # if chat_settings.start_time and chat_settings.end_time:
-    #     start_time = datetime.time.fromisoformat(chat_settings.start_time)
-    #     end_time = datetime.time.fromisoformat(chat_settings.end_time)
-    #     current_time = datetime.datetime.now().time()
-
-    #     chat_status = 'Online' if time_in_range(
-    #         start_time, end_time, current_time) else 'Offline'
-    # else:
-    #     chat_status = 'Online'
-
-    result['enable_chat'] = True
-    result['chat_status'] = "Online"
-    return result
 
 def get_user_settings():
     """Get the user settings
